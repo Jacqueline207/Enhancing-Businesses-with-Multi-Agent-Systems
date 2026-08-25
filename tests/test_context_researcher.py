@@ -34,3 +34,35 @@ def test_handles_empty_client_brief():
 def test_uses_custom_audience_when_provided():
     result = run_context_research({"topic": "standing desks", "audience": "HR managers"})
     assert "HR managers" in result["audience_summary"]
+
+
+def test_ctx_ids_are_present_and_sequential():
+    result = run_context_research({"topic": "standing desks"})
+    ids = [t["id"] for t in result["themes"]]
+    assert ids == ["CTX-001", "CTX-002", "CTX-003"]
+
+
+def test_flags_assumed_defaults_when_data_missing():
+    """Should never silently invent values -- must flag what it guessed."""
+    result = run_context_research({})
+    assert "assumed_defaults" in result
+    assert "audience" in result["assumed_defaults"]
+    assert "tone" in result["assumed_defaults"]
+    assert "topic" in result["assumed_defaults"]
+
+
+def test_no_defaults_flagged_when_all_data_provided():
+    result = run_context_research({
+        "topic": "standing desks",
+        "audience": "HR managers",
+        "tone": "professional",
+    })
+    assert result["assumed_defaults"] == []
+
+
+def test_handles_invalid_client_brief_type():
+    """Should not crash if client_brief is None or wrong type entirely."""
+    result = run_context_research(None)
+    assert "audience_summary" in result
+    result2 = run_context_research("not a dict")
+    assert "audience_summary" in result2

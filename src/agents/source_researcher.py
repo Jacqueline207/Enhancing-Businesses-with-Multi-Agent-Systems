@@ -1,26 +1,16 @@
 """Source Researcher agent."""
 
-"""
-for Dejameir (integration)
-
-the input is the client brief and the output consist of sources and key facts
-
-the body should contain real search and API integration
-the return signature and return shape should be the same as here so orchestrator.py likely 
-wont change
-"""
-
-"""Source Researcher agent."""
-
 from src.integrations.reasearch_tools import search_web
 
 
-def run_source_research(client_brief: dict) -> dict:
+def run_source_research(client_brief) -> dict:
     """
     Gathers factual, source-backed evidence for the Writer and Critic.
 
     INPUT:
         client_brief: dict, expects at least {"topic": str}
+        If client_brief is missing, not a dict, or topic is missing/invalid,
+        this is handled gracefully -- never crashes.
 
     OUTPUT:
         {
@@ -28,7 +18,12 @@ def run_source_research(client_brief: dict) -> dict:
             "key_facts": [{"id": "R-001", "fact": str, "source_url": str}, ...]
         }
     """
-    topic = client_brief.get("topic", "")
+    if not isinstance(client_brief, dict):
+        client_brief = {}
+
+    topic = client_brief.get("topic")
+    if not topic or not isinstance(topic, str):
+        topic = "general research"
 
     raw_results = search_web(topic, max_results=5)
 

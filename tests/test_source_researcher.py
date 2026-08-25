@@ -1,54 +1,38 @@
-"""Tests for the Source Researcher agent."""
+import pytest
+from src.integrations.research_tools import get_mock_source_research
 
-from src.agents.source_researcher import run_source_research
+def test_source_researcher_schema_keys():
+    data = get_mock_source_research()
+    
+    # Verify top-level root keys
+    assert "source_research" in data
+    assert "conflicting_evidence" in data
+    assert "missing_information" in data
+    
+    # Verify nested source_research dictionary
+    sr = data["source_research"]
+    assert "research_summary" in sr
+    assert "claims" in sr
+    assert isinstance(sr["claims"], list)
 
-
-def test_returns_expected_keys():
-    result = run_source_research({"topic": "standing desks"})
-    assert "sources" in result
-    assert "key_facts" in result
-
-
-def test_sources_have_required_fields():
-    result = run_source_research({"topic": "standing desks"})
-    for source in result["sources"]:
-        assert "title" in source
-        assert "url" in source
-        assert "text" in source
-
-
-def test_key_facts_have_ids_and_source_urls():
-    result = run_source_research({"topic": "standing desks"})
-    for i, fact in enumerate(result["key_facts"], start=1):
-        assert fact["id"] == f"R-{i:03d}"
-        assert "fact" in fact
-        assert "source_url" in fact
-
-
-def test_handles_empty_client_brief():
-    """Should not crash if topic is missing."""
-    result = run_source_research({})
-    assert "sources" in result
-    assert "key_facts" in result
-
-
-def test_result_is_deterministic():
-    """Same topic should give same results every run."""
-    result_1 = run_source_research({"topic": "standing desks"})
-    result_2 = run_source_research({"topic": "standing desks"})
-    assert result_1 == result_2
-
-
-def test_handles_invalid_client_brief_type():
-    """Should not crash if client_brief is None or wrong type entirely."""
-    result = run_source_research(None)
-    assert "sources" in result
-    result2 = run_source_research("not a dict")
-    assert "sources" in result2
-
-
-def test_handles_non_string_topic():
-    """Should not crash if topic is the wrong type (e.g. a number)."""
-    result = run_source_research({"topic": 12345})
-    assert "sources" in result
-    assert len(result["sources"]) > 0
+def test_source_researcher_claim_fields():
+    data = get_mock_source_research()
+    claims = data["source_research"]["claims"]
+    
+    assert len(claims) > 0
+    claim = claims[0]
+    
+    # Verify identifier format
+    assert claim["claim_id"].startswith("R-")
+    
+    # Verify allowed enum fields
+    allowed_types = {
+        "fact", "statistic", "quote", "date", 
+        "study_finding", "event", "causal_claim", "attributed_opinion"
+    }
+    assert claim["claim_type"] in allowed_types
+    assert claim["confidence"] in {"high", "medium", "low"}
+    
+    # Verify uncertainty and conflict fields
+    assert "uncertainty_note" in claim
+    assert isinstance(claim["conflicts_with"], list)

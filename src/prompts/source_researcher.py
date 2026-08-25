@@ -10,14 +10,12 @@ class SourceResearcher:
         """
         Executes the Source Researcher agent and returns formatted factual research JSON.
         """
-        # Formulate input payload
         user_message = {
             "client_brief": client_brief,
             "source_research_request": research_request,
             "retrieved_source_material": retrieved_material
         }
         
-        # LLM Invocation / Fallback logic
         if self.llm_client:
             raw_response = self.llm_client.generate(
                 system=self.system_prompt,
@@ -25,7 +23,7 @@ class SourceResearcher:
             )
             return json.loads(raw_response)
         
-        # Fallback default structure if called without LLM execution
+        # Fallback response for offline testing
         return {
             "source_research": {
                 "research_summary": "Sample source research summary.",

@@ -13,3 +13,6 @@ The expected output should eventually include:
 - SEVERITY
 - RETRY
 """
+CRITIC_SYSTEM_PROMPT = """
+...
+"""

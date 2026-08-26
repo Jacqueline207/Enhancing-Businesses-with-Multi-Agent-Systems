@@ -32,7 +32,7 @@ def _empty_critic_output(message: str) -> dict:
         "revision_instructions": [],
         "severity": "major",
         "warnings": [message],
-        "retry": False,
+
     }
 
 
@@ -179,7 +179,7 @@ def _validate_critic_output(output: dict) -> dict:
         "revision_instructions": revision_instructions,
         "severity": severity,
         "warnings": warnings,
-        "retry": verdict == "FAIL",
+
     }
 
 

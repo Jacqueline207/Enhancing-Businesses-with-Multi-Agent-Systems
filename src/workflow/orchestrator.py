@@ -110,7 +110,6 @@ class Orchestrator:
             "revision_instructions": state.revision_instructions,
             "draft_version": state.draft_version,
         }
-
         log_event(
             state,
             agent="orchestrator",
@@ -140,9 +139,7 @@ class Orchestrator:
             "source_research": state.source_research,
             "context_research": state.context_research,
             "writer_output": state.writer_output,
-            "retry_count": state.retry_count,
         }
-
         log_event(
             state,
             agent="orchestrator",
@@ -175,12 +172,9 @@ class Orchestrator:
         self,
         state: SharedState,
     ) -> bool:
-        critic_requests_retry = bool(
-            state.critic_output.get("retry", False)
-        )
-
-        retries_remaining = (
-            state.retry_count < state.max_retries
+        return (
+            state.critic_verdict == "FAIL"
+            and state.retry_count < state.max_retries
         )
 
         return (

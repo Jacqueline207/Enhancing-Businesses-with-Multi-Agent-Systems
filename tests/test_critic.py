@@ -84,7 +84,7 @@ def test_critic_pass_returns_all_k1_k8_checks_once():
     )
 
     assert result["verdict"] == "PASS"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert len(result["checks"]) == 8
 
     assert [check["check_id"] for check in result["checks"]] == [
@@ -110,7 +110,7 @@ def test_critic_pass_returns_all_k1_k8_checks_once():
     ]
 
 
-def test_critic_fail_requests_retry():
+def test_critic_fail_returns_no_routing_decision():
     output = valid_model_output()
 
     output["verdict"] = "FAIL"
@@ -136,7 +136,7 @@ def test_critic_fail_requests_retry():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is True
+    assert "retry" not in result
     assert result["severity"] == "major"
     assert result["evidence"] == ["R-001"]
     assert len(result["revision_instructions"]) == 1
@@ -152,7 +152,7 @@ def test_critic_invalid_verdict_becomes_fail():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is True
+    assert "retry" not in result
 
 
 def test_critic_missing_required_input_fails_safely():
@@ -166,7 +166,7 @@ def test_critic_missing_required_input_fails_safely():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert "writer_output" in result["issues"][0]
 
 
@@ -177,7 +177,7 @@ def test_critic_invalid_model_output_fails_safely():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert "expected a dictionary" in result["issues"][0]
 
 
@@ -191,7 +191,7 @@ def test_critic_rejects_missing_k_check():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert result["checks"] == []
     assert "expected K1 through K8 exactly once" in result["issues"][0]
 
@@ -206,7 +206,7 @@ def test_critic_rejects_duplicate_k_check():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert result["checks"] == []
     assert "expected K1 through K8 exactly once" in result["issues"][0]
 
@@ -221,7 +221,7 @@ def test_critic_rejects_wrong_check_name():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert result["checks"] == []
     assert "expected K1 through K8 exactly once" in result["issues"][0]
 
@@ -236,7 +236,7 @@ def test_critic_rejects_invalid_check_status():
     )
 
     assert result["verdict"] == "FAIL"
-    assert result["retry"] is False
+    assert "retry" not in result
     assert result["checks"] == []
     assert "expected K1 through K8 exactly once" in result["issues"][0]
 

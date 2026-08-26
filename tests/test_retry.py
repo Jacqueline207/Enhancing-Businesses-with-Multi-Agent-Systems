@@ -1,259 +1,149 @@
-"""Tests for retry and routing behavior."""
+"""Tests for retry and escalation behavior.
 
-import src.workflow.orchestrator as orchestrator_module
-from src.state import SharedState
+These tests verify:
+- FAIL allows an automated retry
+- PASS stops retry behavior
+- retry_count respects max_retries
+- critical issues escalate to human review
+- max retries escalate to human review
+- Critic feedback reaches the Writer
+"""
+
+from unittest.mock import patch
+from src.agents.writer import CriticFeedback
+from src.state import (
+    ClientBrief,
+    CriticIssue,
+    CriticOutput,
+    RevisionInstruction,
+    WriterOutput,
+    create_shared_state,
+)
 from src.workflow.orchestrator import Orchestrator
+from src.workflow.retry import escalate_to_human, should_retry
 
 
-def valid_checks():
-    return [
-        {"check_id": f"K{number}"}
-        for number in range(1, 9)
-    ]
+# shared test data
+
+BRIEF = ClientBrief(
+    topic="Test topic",
+    audience="General public",
+    tone="Informative",
+    length="500 words",
+    required_sections=["Introduction", "Body", "Conclusion"],
+)
 
 
-def test_critic_fail_triggers_writer_retry_and_increments_count(
-    monkeypatch,
-):
-    orchestrator = Orchestrator(max_retries=2)
-
-    state = SharedState(
-        client_brief={"topic": "Test topic"},
-        max_retries=2,
+def make_major_failure() -> CriticOutput:
+    """Create a normal retryable Critic failure."""
+    issue = CriticIssue(
+        issue_id="I-001",
+        check_ids=["K1", "K3"],
+        issue_type="unsupported_claim",
+        severity="major",
+        draft_excerpt="Unsupported statement.",
+        evidence=[],
+        explanation="The statement does not have supporting research.",
+    )
+    instruction = RevisionInstruction(
+        issue_id="I-001",
+        instruction="Remove the unsupported claim or rewrite it using verified evidence.",
+    )
+    return CriticOutput(
+        verdict="FAIL",
+        issues=[issue],
+        revision_instructions=[instruction],
+        warnings=[],
     )
 
-    critic_calls = []
-    writer_calls = []
 
-    def fake_critic_step(current_state):
-        critic_calls.append(1)
-
-        if len(critic_calls) == 1:
-            current_state.critic_verdict = "FAIL"
-            current_state.critic_output = {
-                "verdict": "FAIL",
-                "checks": valid_checks(),
-                "revision_instructions": [
-                    {
-                        "instruction": "Revise the unsupported claim.",
-                    }
-                ],
-            }
-        else:
-            current_state.critic_verdict = "PASS"
-            current_state.critic_output = {
-                "verdict": "PASS",
-                "checks": valid_checks(),
-                "revision_instructions": [],
-            }
-
-    def fake_writer_step(current_state):
-        writer_calls.append(current_state.retry_count)
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_critic_step",
-        fake_critic_step,
+def make_critical_failure() -> CriticOutput:
+    """Create a Critic failure requiring human review."""
+    issue = CriticIssue(
+        issue_id="I-001",
+        check_ids=["K6"],
+        issue_type="publication_risk",
+        severity="critical",
+        draft_excerpt="Risky statement.",
+        evidence=[],
+        explanation="The draft contains a critical publication risk.",
+    )
+    return CriticOutput(
+        verdict="FAIL",
+        issues=[issue],
+        revision_instructions=[RevisionInstruction(issue_id="I-001", instruction="Escalate this publication risk for review.")],
+        warnings=[],
     )
 
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_writer_step",
-        fake_writer_step,
-    )
 
-    orchestrator._run_critic_retry_loop(state)
+#retry policy tests
 
-    assert state.retry_count == 1
-    assert writer_calls == [1]
-    assert len(critic_calls) == 2
-    assert state.final_status == "COMPLETED"
+def test_fail_allows_retry():
+    state = create_shared_state(BRIEF, max_retries=2)
+    critic = make_major_failure()
+    assert should_retry(state, critic) is True
 
 
-def test_critic_feedback_and_retry_count_reach_writer(
-    monkeypatch,
-):
-    orchestrator = Orchestrator(max_retries=2)
-
-    state = SharedState(
-        client_brief={"topic": "Test topic"},
-        max_retries=2,
-    )
-
-    state.source_research = {
-        "claims": [],
-    }
-
-    state.context_research = {
-        "context_notes": [],
-    }
-
-    state.critic_output = {
-        "verdict": "FAIL",
-        "checks": valid_checks(),
-        "revision_instructions": [
-            {
-                "instruction": "Revise the draft.",
-            }
-        ],
-    }
-
-    state.retry_count = 1
-
-    captured_input = {}
-
-    def fake_run_writer(writer_input):
-        captured_input.update(writer_input)
-
-        return {
-            "article": "Revised article.",
-        }
-
-    monkeypatch.setattr(
-        orchestrator_module,
-        "run_writer",
-        fake_run_writer,
-    )
-
-    orchestrator._run_writer_step(state)
-
-    assert captured_input["client_brief"] == state.client_brief
-    assert captured_input["source_research"] == state.source_research
-    assert captured_input["context_research"] == state.context_research
-    assert captured_input["critic_feedback"] == state.critic_output
-    assert captured_input["retry_count"] == 1
-    assert state.writer_output["article"] == "Revised article."
+def test_pass_stops_retry_behavior():
+    state = create_shared_state(BRIEF, max_retries=2)
+    critic = CriticOutput(verdict="PASS", issues=[], revision_instructions=[], warnings=[])
+    assert should_retry(state, critic) is False
 
 
-def test_pass_stops_retry_behavior(
-    monkeypatch,
-):
-    orchestrator = Orchestrator(max_retries=2)
-
-    state = SharedState(
-        client_brief={"topic": "Test topic"},
-        max_retries=2,
-    )
-
-    writer_calls = []
-
-    def fake_critic_step(current_state):
-        current_state.critic_verdict = "PASS"
-        current_state.critic_output = {
-            "verdict": "PASS",
-            "checks": valid_checks(),
-            "revision_instructions": [],
-        }
-
-    def fake_writer_step(current_state):
-        writer_calls.append(1)
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_critic_step",
-        fake_critic_step,
-    )
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_writer_step",
-        fake_writer_step,
-    )
-
-    orchestrator._run_critic_retry_loop(state)
-
-    assert state.retry_count == 0
-    assert writer_calls == []
-    assert state.final_status == "COMPLETED"
-
-
-def test_maximum_retries_stop_automated_retry(
-    monkeypatch,
-):
-    orchestrator = Orchestrator(max_retries=2)
-
-    state = SharedState(
-        client_brief={"topic": "Test topic"},
-        max_retries=2,
-    )
-
+def test_maximum_retries_stop_automated_retry():
+    state = create_shared_state(BRIEF, max_retries=2)
     state.retry_count = 2
-
-    writer_calls = []
-
-    def fake_critic_step(current_state):
-        current_state.critic_verdict = "FAIL"
-        current_state.critic_output = {
-            "verdict": "FAIL",
-            "checks": valid_checks(),
-            "revision_instructions": [
-                {
-                    "instruction": "Revise again.",
-                }
-            ],
-        }
-
-    def fake_writer_step(current_state):
-        writer_calls.append(1)
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_critic_step",
-        fake_critic_step,
-    )
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_writer_step",
-        fake_writer_step,
-    )
-
-    orchestrator._run_critic_retry_loop(state)
-
-    assert state.retry_count == 2
-    assert writer_calls == []
-    assert state.final_status == "HUMAN_REVIEW"
+    critic = make_major_failure()
+    assert should_retry(state, critic) is False
 
 
-def test_critic_infrastructure_failure_does_not_use_retry(
-    monkeypatch,
-):
+# human escalation test
+
+def test_critical_issue_escalates_immediately():
+    state = create_shared_state(BRIEF, max_retries=2)
+    critic = make_critical_failure()
+    assert escalate_to_human(state, critic) is True
+
+
+def test_max_retries_escalates_to_human():
+    state = create_shared_state(BRIEF, max_retries=2)
+    state.retry_count = 2
+    critic = make_major_failure()
+    assert escalate_to_human(state, critic) is True
+
+
+def test_normal_failure_does_not_immediately_escalate():
+    state = create_shared_state(BRIEF, max_retries=2)
+    critic = make_major_failure()
+    assert escalate_to_human(state, critic) is False
+
+
+# writer revision handoff
+def test_critic_feedback_and_retry_count_reach_writer():
     orchestrator = Orchestrator(max_retries=2)
+    state = create_shared_state(BRIEF, max_retries=2)
+    state.retry_count = 1
+    critic = make_major_failure()
 
-    state = SharedState(
-        client_brief={"topic": "Test topic"},
-        max_retries=2,
+    feedback = CriticFeedback(
+        issues=critic.issues,
+        revision_instructions=critic.revision_instructions,
+        warnings=critic.warnings,
     )
 
-    writer_calls = []
+    captured = {}
 
-    def fake_critic_step(current_state):
-        current_state.critic_verdict = "FAIL"
-        current_state.critic_output = {
-            "verdict": "FAIL",
-            "checks": [],
-            "issues": [
-                "Critic model unavailable.",
-            ],
-        }
+    def fake_writer(writer_input):
+        captured["retry_count"] = writer_input.retry_count
+        captured["critic_feedback"] = writer_input.critic_feedback
+        return WriterOutput(title="Revised Article", article="Revised article.")
 
-    def fake_writer_step(current_state):
-        writer_calls.append(1)
+    with patch("src.workflow.orchestrator.run_writer", side_effect=fake_writer):
+        orchestrator._run_writer(state, critic_feedback=feedback)
 
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_critic_step",
-        fake_critic_step,
-    )
-
-    monkeypatch.setattr(
-        orchestrator,
-        "_run_writer_step",
-        fake_writer_step,
-    )
-
-    orchestrator._run_critic_retry_loop(state)
-
-    assert state.retry_count == 0
-    assert writer_calls == []
-    assert state.final_status == "HUMAN_REVIEW"
+    assert captured["retry_count"] == 1
+    assert captured["critic_feedback"] is not None
+    assert captured["critic_feedback"].revision_instructions[0].issue_id == "I-001"
+    assert state.writer_output.article == "Revised article."
+    assert state.writer_draft == "Revised article."
+    assert state.draft_version == 1

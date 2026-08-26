@@ -24,7 +24,7 @@ SAMPLE_CLIENT_BRIEF = ClientBrief(
 #main workflow
 
 async def main() -> None:
-    print("\n***\n MULTI-AGENT CONTENT WORKFLOW\n***\n")
+    print("\n\n *MULTI-AGENT CONTENT WORKFLOW*\n\n")
     print(f"Topic: {SAMPLE_CLIENT_BRIEF.topic}")
     print("Starting workflow...\n")
 
@@ -32,7 +32,7 @@ async def main() -> None:
     state = await orchestrator.run(SAMPLE_CLIENT_BRIEF)
 
     # workflow summary
-    print("\n===\n WORKFLOW RESULT\n===")
+    print("\n\n WORKFLOW RESULT:\n")
     print(f"Run ID: {state.run_id}")
     print(f"Final Status: {state.final_status}")
     print(f"Retry Count: {state.retry_count}/{state.max_retries}")
@@ -40,7 +40,7 @@ async def main() -> None:
 
     # critic summary
     if state.critic_output:
-        print("\n---\n CRITIC RESULT\n----")
+        print("\n\n CRITIC RESULT:\n")
         print(f"Verdict: {state.critic_output.verdict}")
         print(f"Severity: {state.severity or 'none'}")
 
@@ -59,17 +59,17 @@ async def main() -> None:
                 print(f"- {instruction.issue_id}: {instruction.instruction}")
 
     # final output
-    print("\n---\n FINAL OUTPUT\n---")
+    print("\n--------------\n FINAL OUTPUT\n--------------")
     if state.final_output:
         print(state.final_output)
     else:
         print("No final article was produced.")
 
     # logging information
-    print("\n---\n OBSERVABILITY\n---")
+    print("\n\n OBSERVABILITY:\n")
     print(f"Workflow Events: {len(state.events)}")
     print(f"Log File: {get_log_path(state)}")
-    print("\n===\n WORKFLOW COMPLETE\n===\n")
+    print("\n\n WORKFLOW COMPLETE\n\n")
 
 
 # python module entry point

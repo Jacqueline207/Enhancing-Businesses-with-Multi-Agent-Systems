@@ -172,15 +172,17 @@ class Orchestrator:
         self,
         state: SharedState,
     ) -> bool:
-        return (
-            state.critic_verdict == "FAIL"
-            and state.retry_count < state.max_retries
+        checks = state.critic_output.get("checks", [])
+
+        critic_completed_review = (
+            isinstance(checks, list)
+            and len(checks) == 8
         )
 
         return (
             state.critic_verdict == "FAIL"
-            and critic_requests_retry
-            and retries_remaining
+            and critic_completed_review
+            and state.retry_count < state.max_retries
         )
 
     def _run_critic_retry_loop(

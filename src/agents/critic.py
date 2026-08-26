@@ -9,9 +9,24 @@ from urllib.request import Request, urlopen
 from src.prompts.critic_prompt import CRITIC_SYSTEM_PROMPT
 
 
+EXPECTED_CHECKS = {
+    "K1": "factual_grounding",
+    "K2": "source_fidelity",
+    "K3": "unsupported_claims",
+    "K4": "client_requirements",
+    "K5": "internal_consistency",
+    "K6": "publication_risk",
+    "K7": "research_uncertainty",
+    "K8": "conflicting_evidence",
+}
+
+ALLOWED_CHECK_STATUSES = {"PASS", "FAIL", "WARNING"}
+
+
 def _empty_critic_output(message: str) -> dict:
     return {
         "verdict": "FAIL",
+        "checks": [],
         "issues": [message],
         "evidence": [],
         "revision_instructions": [],
@@ -21,17 +36,74 @@ def _empty_critic_output(message: str) -> dict:
     }
 
 
+def _validate_checks(checks) -> Optional[list]:
+    if not isinstance(checks, list) or len(checks) != 8:
+        return None
+
+    seen_ids = set()
+    validated_checks = []
+
+    for check in checks:
+        if not isinstance(check, dict):
+            return None
+
+        check_id = check.get("check_id")
+        check_name = check.get("check_name")
+        status = check.get("status")
+        notes = check.get("notes", "")
+
+        if check_id not in EXPECTED_CHECKS:
+            return None
+
+        if check_id in seen_ids:
+            return None
+
+        if check_name != EXPECTED_CHECKS[check_id]:
+            return None
+
+        if status not in ALLOWED_CHECK_STATUSES:
+            return None
+
+        if not isinstance(notes, str):
+            notes = str(notes)
+
+        seen_ids.add(check_id)
+
+        validated_checks.append(
+            {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": status,
+                "notes": notes,
+            }
+        )
+
+    if seen_ids != set(EXPECTED_CHECKS):
+        return None
+
+    validated_checks.sort(
+        key=lambda item: int(item["check_id"][1:])
+    )
+
+    return validated_checks
+
+
 def _validate_critic_output(output: dict) -> dict:
     if not isinstance(output, dict):
         return _empty_critic_output(
             "Critic returned invalid output: expected a dictionary."
         )
 
+    checks = _validate_checks(output.get("checks"))
+
+    if checks is None:
+        return _empty_critic_output(
+            "Critic returned invalid checks: expected K1 through K8 exactly once."
+        )
+
     verdict = output.get("verdict", "FAIL")
     issues = output.get("issues", [])
-    evidence = output.get("evidence", [])
     revision_instructions = output.get("revision_instructions", [])
-    severity = output.get("severity")
     warnings = output.get("warnings", [])
 
     if verdict not in {"PASS", "FAIL"}:
@@ -40,20 +112,68 @@ def _validate_critic_output(output: dict) -> dict:
     if not isinstance(issues, list):
         issues = []
 
-    if not isinstance(evidence, list):
-        evidence = []
-
     if not isinstance(revision_instructions, list):
         revision_instructions = []
-
-    if severity not in {"minor", "major", "critical", None}:
-        severity = "major"
 
     if not isinstance(warnings, list):
         warnings = []
 
+    evidence = []
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+
+        issue_evidence = issue.get("evidence", [])
+
+        if not isinstance(issue_evidence, list):
+            continue
+
+        for evidence_item in issue_evidence:
+            if evidence_item not in evidence:
+                evidence.append(evidence_item)
+
+    if not evidence:
+        legacy_evidence = output.get("evidence", [])
+
+        if isinstance(legacy_evidence, list):
+            evidence = legacy_evidence
+
+    severity_rank = {
+        "minor": 1,
+        "major": 2,
+        "critical": 3,
+    }
+
+    severity = None
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+
+        issue_severity = issue.get("severity")
+
+        if issue_severity not in severity_rank:
+            continue
+
+        if (
+            severity is None
+            or severity_rank[issue_severity] > severity_rank[severity]
+        ):
+            severity = issue_severity
+
+    legacy_severity = output.get("severity")
+
+    if severity is None and legacy_severity in {
+        "minor",
+        "major",
+        "critical",
+    }:
+        severity = legacy_severity
+
     return {
         "verdict": verdict,
+        "checks": checks,
         "issues": issues,
         "evidence": evidence,
         "revision_instructions": revision_instructions,

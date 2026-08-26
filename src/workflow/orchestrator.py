@@ -102,13 +102,16 @@ class Orchestrator:
         state: SharedState,
     ) -> None:
         state.draft_version += 1
-
         writer_input = {
             "client_brief": state.client_brief,
             "source_research": state.source_research,
             "context_research": state.context_research,
-            "revision_instructions": state.revision_instructions,
-            "draft_version": state.draft_version,
+            "critic_feedback": (
+                state.critic_output
+                if state.retry_count > 0
+                else None
+            ),
+            "retry_count": state.retry_count,
         }
         log_event(
             state,

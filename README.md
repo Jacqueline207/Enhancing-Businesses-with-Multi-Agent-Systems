@@ -217,6 +217,24 @@ cp .env.example .env            # then fill in your real API keys
 > **Security:** Never commit a real `.env` file or API key. `.env` is excluded via `.gitignore`; only `.env.example` (placeholders) is committed.
  
 ## How to Run the System
+
+In `main.py`, make sure to update the **Client Brief** 
+
+*Fieldstone Media* clients should have an idea of what they are looking to create
+
+They have their own desired *topic*, *audience*, *tone*, *length*, etc...
+```
+SAMPLE_CLIENT_BRIEF = ClientBrief(
+    topic="A topic",
+    audience="General public",
+    tone="Informative, balanced, and concerned",
+    length="500 words",
+    required_sections=["Introduction", "Main concerns", "Potential benefits", "Conclusion"],
+    objective="Explain why...",
+    format="Article",
+    special_instructions="Do not invent facts, statistics, quotes, sources, or events. Clearly represent research uncertainty.",
+)
+```
  
 ```bash
 python -m src.main

@@ -1,153 +1,136 @@
-"""Writer agent."""
+"""Writer agent.
 
-import json
-import os
-from typing import Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+the writer creates initial article and handles revisions requested 
+by the Critic. Factual claims must come from source research
+and context research is editorial guidance only. The writers only
+job is to recieve structured inputs and give them to the model and then
+convert the respose into a WriterOutput
 
+also, standardizing the whole project on LLM_API_KEY, LLM_MODEL, and LLM_API_BASE_URL
+since we are pointing at DeepSeek
+
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from src.integrations.ai_gateway import call_agent_json
 from src.prompts.writer_prompt import WRITER_SYSTEM_PROMPT
+from src.state import (
+    ClaimTraceEntry,
+    ClientBrief,
+    ContextResearch,
+    RequirementSelfCheck,
+    RevisionInstruction,
+    RevisionSummaryEntry,
+    SourceResearch,
+    WriterOutput,
+)
 
 
-def _empty_writer_output(message: str) -> dict:
-    return {
-        "article": "",
-        "source_claim_ids_used": [],
-        "claim_trace": [],
-        "requirements_self_check": [],
-        "unsupported_or_missing_information": [message],
-        "revision_summary": [],
-    }
+@dataclass
+class CriticFeedback:
+    """feedback passed from the Critic back to the Writer."""
 
+    issues: list[Any]
 
-def _validate_writer_output(output: dict) -> dict:
-    if not isinstance(output, dict):
-        return _empty_writer_output(
-            "Writer returned invalid output: expected a dictionary."
-        )
-
-    article = output.get("article", "")
-    source_claim_ids_used = output.get("source_claim_ids_used", [])
-    claim_trace = output.get("claim_trace", [])
-    requirements_self_check = output.get("requirements_self_check", [])
-    unsupported_or_missing_information = output.get(
-        "unsupported_or_missing_information",
-        [],
-    )
-    revision_summary = output.get("revision_summary", [])
-
-    if not isinstance(article, str):
-        article = ""
-
-    if not isinstance(source_claim_ids_used, list):
-        source_claim_ids_used = []
-
-    if not isinstance(claim_trace, list):
-        claim_trace = []
-
-    if not isinstance(requirements_self_check, list):
-        requirements_self_check = []
-
-    if not isinstance(unsupported_or_missing_information, list):
-        unsupported_or_missing_information = []
-
-    if not isinstance(revision_summary, list):
-        revision_summary = []
-
-    return {
-        "article": article,
-        "source_claim_ids_used": source_claim_ids_used,
-        "claim_trace": claim_trace,
-        "requirements_self_check": requirements_self_check,
-        "unsupported_or_missing_information": unsupported_or_missing_information,
-        "revision_summary": revision_summary,
-    }
-
-
-def _call_model(writer_input: dict) -> Optional[dict]:
-    api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL")
-
-    if not api_key or not model:
-        return None
-
-    api_url = os.getenv(
-        "OPENAI_API_URL",
-        "https://api.openai.com/v1/chat/completions",
-    )
-
-    messages = [
-        {
-            "role": "system",
-            "content": WRITER_SYSTEM_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": json.dumps(writer_input, ensure_ascii=False),
-        },
+    revision_instructions: list[
+        RevisionInstruction
     ]
 
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-    }
+    warnings: list[str]
 
-    request = Request(
-        api_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
 
-    try:
-        with urlopen(request, timeout=60) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-        return None
+@dataclass
+class WriterInput:
+    """complete input contract for the Writer."""
 
-    try:
-        content = response_data["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
-        return None
+    client_brief: ClientBrief
+
+    source_research: Optional[
+        SourceResearch
+    ]
+
+    context_research: Optional[
+        ContextResearch
+    ]
+
+    critic_feedback: Optional[
+        CriticFeedback
+    ]
+
+    retry_count: int
 
 
 def run_writer(
-    writer_input: dict,
-    model_output: Optional[dict] = None,
-) -> dict:
-    if not isinstance(writer_input, dict):
-        return _empty_writer_output(
-            "Invalid writer_input: expected a dictionary."
-        )
+    writer_input: WriterInput,
+) -> WriterOutput:
+    """
+    run the Writer agent.
 
-    required_inputs = (
-        "client_brief",
-        "source_research",
-        "context_research",
+    on the first attempt:
+        critic_feedback = None
+        retry_count = 0
+
+    on a revision:
+        critic_feedback contains the Critic's issues
+        retry_count > 0
+    """
+
+    result = call_agent_json(
+        system_prompt=WRITER_SYSTEM_PROMPT,
+        input_payload=writer_input,
     )
 
-    missing_inputs = [
-        name
-        for name in required_inputs
-        if name not in writer_input
-    ]
+    return WriterOutput(
+        title=result.get(
+            "title",
+            "",
+        ),
 
-    if missing_inputs:
-        return _empty_writer_output(
-            "Writer input is missing: " + ", ".join(missing_inputs)
-        )
+        article=result.get(
+            "article",
+            "",
+        ),
 
-    if model_output is None:
-        model_output = _call_model(writer_input)
+        source_claim_ids_used=result.get(
+            "source_claim_ids_used",
+            [],
+        ),
 
-    if model_output is None:
-        return _empty_writer_output(
-            "Writer model is not configured or did not return valid JSON."
-        )
+        claim_trace=[
+            ClaimTraceEntry(**entry)
+            for entry
+            in result.get(
+                "claim_trace",
+                [],
+            )
+        ],
 
-    return _validate_writer_output(model_output)
+        requirements_self_check=[
+            RequirementSelfCheck(**item)
+            for item
+            in result.get(
+                "requirements_self_check",
+                [],
+            )
+        ],
+
+        unsupported_or_missing_information=(
+            result.get(
+                "unsupported_or_missing_information",
+                [],
+            )
+        ),
+
+        revision_summary=[
+            RevisionSummaryEntry(**item)
+            for item
+            in result.get(
+                "revision_summary",
+                [],
+            )
+        ],
+    )

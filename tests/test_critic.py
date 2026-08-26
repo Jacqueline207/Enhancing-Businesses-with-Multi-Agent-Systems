@@ -1,93 +1,63 @@
 """Tests for Critic behavior and K1-K8 QA contract."""
+from unittest.mock import patch
 
-from copy import deepcopy
-
-from src.agents.critic import run_critic
-
-
-VALID_CRITIC_INPUT = {
-    "client_brief": {"topic": "Test topic"},
-    "source_research": {"claims": []},
-    "context_research": {"context_notes": []},
-    "writer_output": {"article": "Test article"},
-}
+from src.agents.critic import (
+    CriticInput,
+    run_critic,
+)
+from src.state import (
+    ClientBrief,
+)
 
 
-VALID_CHECKS = [
-    {
-        "check_id": "K1",
-        "check_name": "factual_grounding",
-        "status": "PASS",
-        "notes": "Factual claims are grounded.",
-    },
-    {
-        "check_id": "K2",
-        "check_name": "source_fidelity",
-        "status": "PASS",
-        "notes": "Sources are represented faithfully.",
-    },
-    {
-        "check_id": "K3",
-        "check_name": "unsupported_claims",
-        "status": "PASS",
-        "notes": "No unsupported claims found.",
-    },
-    {
-        "check_id": "K4",
-        "check_name": "client_requirements",
-        "status": "PASS",
-        "notes": "Client requirements are satisfied.",
-    },
-    {
-        "check_id": "K5",
-        "check_name": "internal_consistency",
-        "status": "PASS",
-        "notes": "The article is internally consistent.",
-    },
-    {
-        "check_id": "K6",
-        "check_name": "publication_risk",
-        "status": "PASS",
-        "notes": "No blocking publication risk found.",
-    },
-    {
-        "check_id": "K7",
-        "check_name": "research_uncertainty",
-        "status": "PASS",
-        "notes": "Research uncertainty is preserved.",
-    },
-    {
-        "check_id": "K8",
-        "check_name": "conflicting_evidence",
-        "status": "PASS",
-        "notes": "No unresolved conflicting evidence found.",
-    },
-]
+BRIEF = ClientBrief(
+    topic="Test topic",
+    audience="General audience",
+    tone="Informative",
+    length="500 words",
+    required_sections=[
+        "intro",
+        "body",
+        "conclusion",
+    ],
+)
 
 
-def valid_model_output():
-    return {
-        "verdict": "PASS",
-        "checks": deepcopy(VALID_CHECKS),
-        "issues": [],
-        "evidence": [],
-        "revision_instructions": [],
-        "severity": None,
-        "warnings": [],
-    }
+CRITIC_INPUT = CriticInput(
+    client_brief=BRIEF,
+    source_research=None,
+    context_research=None,
+    writer_output=None,
+)
 
 
-def test_critic_pass_returns_all_k1_k8_checks_once():
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        valid_model_output(),
+def test_critic_pass_contains_k1_through_k8():
+
+    with patch(
+        "src.agents.critic.call_agent_json"
+    ) as mock_call:
+
+        mock_call.return_value = {
+            "verdict": "PASS",
+            "checks": [],
+            "issues": [],
+            "revision_instructions": [],
+            "warnings": [],
+        }
+
+        result = run_critic(
+            CRITIC_INPUT
+        )
+
+    assert (
+        result.verdict
+        == "PASS"
     )
 
-    assert result["verdict"] == "PASS"
-    assert "retry" not in result
-    assert len(result["checks"]) == 8
-
-    assert [check["check_id"] for check in result["checks"]] == [
+    assert [
+        check.check_id
+        for check in result.checks
+    ] == [
         "K1",
         "K2",
         "K3",
@@ -98,167 +68,206 @@ def test_critic_pass_returns_all_k1_k8_checks_once():
         "K8",
     ]
 
-    assert [check["check_name"] for check in result["checks"]] == [
-        "factual_grounding",
-        "source_fidelity",
-        "unsupported_claims",
-        "client_requirements",
-        "internal_consistency",
-        "publication_risk",
-        "research_uncertainty",
-        "conflicting_evidence",
-    ]
 
+def test_major_issue_forces_fail():
 
-def test_critic_fail_returns_no_routing_decision():
-    output = valid_model_output()
+    with patch(
+        "src.agents.critic.call_agent_json"
+    ) as mock_call:
 
-    output["verdict"] = "FAIL"
-    output["checks"][2]["status"] = "FAIL"
-    output["issues"] = [
-        {
-            "issue_id": "I-001",
-            "message": "Unsupported claim.",
-            "severity": "major",
-            "evidence": ["R-001"],
+        mock_call.return_value = {
+            "verdict": "PASS",
+
+            "issues": [
+                {
+                    "issue_id": "I-001",
+                    "check_ids": [
+                        "K1",
+                        "K3",
+                    ],
+                    "issue_type": (
+                        "unsupported_claim"
+                    ),
+                    "severity": "major",
+                    "draft_excerpt": (
+                        "Unsupported statement."
+                    ),
+                    "evidence": [],
+                    "explanation": (
+                        "No research evidence "
+                        "supports this statement."
+                    ),
+                }
+            ],
         }
-    ]
-    output["revision_instructions"] = [
-        {
-            "issue_id": "I-001",
-            "instruction": "Remove or support the claim.",
+
+        result = run_critic(
+            CRITIC_INPUT
+        )
+
+    assert (
+        result.verdict
+        == "FAIL"
+    )
+
+    k1 = next(
+        check
+        for check
+        in result.checks
+        if check.check_id == "K1"
+    )
+
+    assert (
+        k1.status
+        == "FAIL"
+    )
+
+
+def test_minor_issue_remains_pass():
+
+    with patch(
+        "src.agents.critic.call_agent_json"
+    ) as mock_call:
+
+        mock_call.return_value = {
+            "verdict": "PASS",
+
+            "issues": [
+                {
+                    "issue_id": "I-001",
+                    "check_ids": [
+                        "K4",
+                    ],
+                    "issue_type": (
+                        "length_violation"
+                    ),
+                    "severity": "minor",
+                    "draft_excerpt": "",
+                    "evidence": [],
+                    "explanation": (
+                        "Article is slightly "
+                        "shorter than requested."
+                    ),
+                }
+            ],
         }
-    ]
 
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+        result = run_critic(
+            CRITIC_INPUT
+        )
+
+    assert (
+        result.verdict
+        == "PASS"
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert result["severity"] == "major"
-    assert result["evidence"] == ["R-001"]
-    assert len(result["revision_instructions"]) == 1
-
-
-def test_critic_invalid_verdict_becomes_fail():
-    output = valid_model_output()
-    output["verdict"] = "MAYBE"
-
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+    assert (
+        len(result.warnings)
+        == 1
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-
-
-def test_critic_missing_required_input_fails_safely():
-    result = run_critic(
-        {
-            "client_brief": {},
-            "source_research": {},
-            "context_research": {},
-        },
-        valid_model_output(),
+    k4 = next(
+        check
+        for check
+        in result.checks
+        if check.check_id == "K4"
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert "writer_output" in result["issues"][0]
-
-
-def test_critic_invalid_model_output_fails_safely():
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        "not-a-dictionary",
+    assert (
+        k4.status
+        == "WARNING"
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert "expected a dictionary" in result["issues"][0]
 
+def test_unknown_issue_type_is_normalized():
 
-def test_critic_rejects_missing_k_check():
-    output = valid_model_output()
-    output["checks"] = output["checks"][:-1]
+    with patch(
+        "src.agents.critic.call_agent_json"
+    ) as mock_call:
 
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+        mock_call.return_value = {
+            "verdict": "FAIL",
+
+            "issues": [
+                {
+                    "issue_id": "",
+                    "check_ids": [
+                        "K3",
+                    ],
+                    "issue_type": (
+                        "made_up_issue"
+                    ),
+                    "severity": "major",
+                    "draft_excerpt": "",
+                    "evidence": [],
+                    "explanation": "",
+                }
+            ],
+        }
+
+        result = run_critic(
+            CRITIC_INPUT
+        )
+
+    assert (
+        result.issues[
+            0
+        ].issue_type
+        == "unsupported_claim"
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert result["checks"] == []
-    assert "expected K1 through K8 exactly once" in result["issues"][0]
-
-
-def test_critic_rejects_duplicate_k_check():
-    output = valid_model_output()
-    output["checks"][7] = deepcopy(output["checks"][0])
-
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+    assert (
+        result.issues[
+            0
+        ].issue_id
+        == "I-001"
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert result["checks"] == []
-    assert "expected K1 through K8 exactly once" in result["issues"][0]
 
+def test_blocking_issue_gets_revision_instruction():
 
-def test_critic_rejects_wrong_check_name():
-    output = valid_model_output()
-    output["checks"][3]["check_name"] = "wrong_name"
+    with patch(
+        "src.agents.critic.call_agent_json"
+    ) as mock_call:
 
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+        mock_call.return_value = {
+            "verdict": "FAIL",
+
+            "issues": [
+                {
+                    "issue_id": "I-001",
+                    "check_ids": [
+                        "K3",
+                    ],
+                    "issue_type": (
+                        "unsupported_claim"
+                    ),
+                    "severity": "major",
+                    "draft_excerpt": "",
+                    "evidence": [],
+                    "explanation": (
+                        "Claim lacks evidence."
+                    ),
+                }
+            ],
+
+            "revision_instructions": [],
+        }
+
+        result = run_critic(
+            CRITIC_INPUT
+        )
+
+    assert (
+        len(
+            result.revision_instructions
+        )
+        == 1
     )
 
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert result["checks"] == []
-    assert "expected K1 through K8 exactly once" in result["issues"][0]
-
-
-def test_critic_rejects_invalid_check_status():
-    output = valid_model_output()
-    output["checks"][5]["status"] = "MAYBE"
-
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
+    assert (
+        result.revision_instructions[
+            0
+        ].issue_id
+        == "I-001"
     )
-
-    assert result["verdict"] == "FAIL"
-    assert "retry" not in result
-    assert result["checks"] == []
-    assert "expected K1 through K8 exactly once" in result["issues"][0]
-
-
-def test_critic_sorts_k_checks_into_k1_k8_order():
-    output = valid_model_output()
-    output["checks"].reverse()
-
-    result = run_critic(
-        VALID_CRITIC_INPUT,
-        output,
-    )
-
-    assert result["verdict"] == "PASS"
-
-    assert [check["check_id"] for check in result["checks"]] == [
-        "K1",
-        "K2",
-        "K3",
-        "K4",
-        "K5",
-        "K6",
-        "K7",
-        "K8",
-    ]

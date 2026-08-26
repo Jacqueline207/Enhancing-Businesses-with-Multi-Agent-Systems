@@ -22,94 +22,102 @@ ex:
 -run_end
 """
 
+
+from __future__ import annotations
 import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from src.state import SharedState, WorkflowEvent
 
-#directory where workflow logs are stored
+
+# log directory
+
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# helpers
+
 def _timestamp() -> str:
-    #Return the current UTC timestamp
     return datetime.now(timezone.utc).isoformat()
+
 
 def _serialize(value: Any) -> Any:
     """
-    convert objects into JSON-safe values.
-
-    this keeps logging from crashing the workflow if an object is not
-    directly JSON serializable
+    convert nested workflow objects into JSON-safe values.
+    logging must never fail simply because a dataclass or other custom Python object was supplied.
     """
     if value is None:
         return None
-
     if isinstance(value, (str, int, float, bool)):
         return value
-
+    if is_dataclass(value):
+        return _serialize(asdict(value))
     if isinstance(value, dict):
-        return {
-            str(key): _serialize(item)
-            for key, item in value.items()
-        }
-
-    if isinstance(value, (list, tuple)):
+        return {str(key): _serialize(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
         return [_serialize(item) for item in value]
-
-    # Handle dataclasses such as SharedState.
     if hasattr(value, "to_dict"):
-        return _serialize(value.to_dict())
-
-    # Final fallback so logging never crashes the workflow.
+        try:
+            return _serialize(value.to_dict())
+        except Exception:
+            pass
+    # Final defensive fallback.
     return str(value)
 
 
 def _get_log_path(run_id: str) -> Path:
-    #return the JSONL log path for a workflow run
+    """Return the JSONL path for a workflow run."""
     return LOG_DIR / f"run_{run_id}.jsonl"
 
 
-def log_event(
-    state,
-    agent: str,
-    event: str,
-    extra: dict | None = None,
-) -> None:
-    
+# main logging function 
+
+def log_event(state: SharedState, agent: str, event: str, extra: dict[str, Any] | None = None) -> WorkflowEvent:
     """
-    write one structured event to the current run's JSONL log.
+    record one workflow event.
 
-    parameters
-    ----------
-    state:
-        Current SharedState object.
+    The event is:
+    1. appended to state.events
+    2. written to logs/run_<run_id>.jsonl
 
-    agent:
-        Name of the agent or workflow component generating the event.
-
-    event:
-        Name describing what happened.
-
-    extra:
-        Optional additional information specific to the event.
+    Logging failures are handled gracefully and must never crash the workflow.
     """
+    safe_extra = _serialize(extra or {})
+    workflow_event = WorkflowEvent(run_id=state.run_id, timestamp=_timestamp(), agent=agent, event=event, extra=safe_extra)
 
+    # In-memory logging
+    try:
+        state.events.append(workflow_event)
+    except Exception as exc:
+        print(f"[WARNING] Unable to append in-memory log event: {exc}")
+
+    # persistent JSONL logging
     record = {
-        "timestamp": _timestamp(),
-        "run_id": state.run_id,
-        "agent": agent,
-        "event": event,
+        "timestamp": workflow_event.timestamp,
+        "run_id": workflow_event.run_id,
+        "agent": workflow_event.agent,
+        "event": workflow_event.event,
         "retry_count": state.retry_count,
         "draft_version": state.draft_version,
-        "data": _serialize(extra or {}),
+        "data": safe_extra,
     }
 
     log_path = _get_log_path(state.run_id)
-
     try:
         with log_path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError as exc:
-        #logging should not be allowed to crash the entire workflow.
+        # Logging must never crash the workflow.
         print(f"[WARNING] Unable to write log event: {exc}")
+
+    return workflow_event
+
+
+#optional helper
+
+def get_log_path(state: SharedState) -> Path:
+    """Public helper for finding the log file associated with a workflow state."""
+    return _get_log_path(state.run_id)

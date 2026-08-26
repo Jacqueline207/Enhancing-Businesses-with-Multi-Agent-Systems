@@ -26,30 +26,47 @@ An agentic workflow that automates research, drafting, and quality review, while
 ## Architecture
  
 ```
-CLIENT BRIEF
-    ↓
-ORCHESTRATOR
-    ↓
-┌────────────────┴────────────────┐
-↓                                  ↓
-SOURCE RESEARCHER          CONTEXT / ANGLE RESEARCHER
-(facts, sources, evidence)  (audience info, themes, trends)
-↓                                  ↓
-└────────────────┬────────────────┘
-    ↓
-SHARED STATE
-    ↓
-WRITER AGENT → DRAFT
-    ↓
-EDITOR / CRITIC
-    ↓
-┌──────────┴──────────┐
-↓                      ↓
-PASS                   FAIL
-↓                      ↓
-HUMAN APPROVAL GATE    REVISION FEEDBACK → WRITER RETRY → CRITIC
-↓
-FINAL OUTPUT
+                        Client Brief
+                              │
+                 ┌────────────┴────────────┐
+                 ↓                     	   ↓
+        Source Researcher      	Context / Angle
+        R-### evidence         	CTX-### guidance
+                 │                         │
+                 └────────────┬────────────┘
+                              ↓
+                         Shared State
+                 source_research kept separate
+                 context_research kept separate
+                              │
+                              ↓
+                            Writer
+                              │
+                        writer_output
+                              │
+                              ↓
+                            Critic
+                       K1–K8 checks
+                         PASS / FAIL
+                              │
+                 ┌────────────┴────────────┐
+                 │                     	   │
+               PASS                   	 FAIL
+                 │                     	   │
+                 ↓                     	   ↓
+           Final Output         	Orchestrator
+                                    decides route
+                                   /        	\
+                           retry available 	escalate
+                                │             	│
+                                ↓             	↓
+                         Writer Revision 	Human Review
+                                │             	│
+                                ↓             	↓
+                              Critic     	Correct/Approve
+                                │             	│
+                                └──────→ 	Final Output
+
 ```
  
 Research is parallelized because the Writer should not produce factual claims before reliable research exists, and source-gathering and context-gathering can safely happen at the same time. Results are merged into shared state before the Writer drafts.
@@ -202,7 +219,7 @@ cp .env.example .env            # then fill in your real API keys
 ## How to Run the System
  
 ```bash
-python src/main.py --brief path/to/client_brief.json
+python -m src.main
 ```
  
 This runs a client brief through the full pipeline: parallel research → shared state merge → Writer → Critic → retry (if needed) → human gate (if triggered) → final output, with a full log written for the run.
@@ -226,6 +243,3 @@ Tests are organized in layers:
 - Exception-only human approval reduces review volume but means minor issues could reach output before being caught by audit.
 - Business-case turnaround/staff-hour figures not yet measured are prototype assumptions, not production data, and should be labeled as such.
 - Exact shared-state schema and Critic JSON structure are finalized during implementation and may evolve from what's documented here.
-## Definition of Done
- 
-The project is complete when the team can demonstrate: a clear architecture; separate agents with separate responsibilities; parallel behavior; shared state; a Writer producing a draft; a Critic judging the draft with PASS/FAIL behavior; retry behavior with a stopping rule; human escalation; full logging; QA tests; end-to-end execution; a defensible business case; a clear explanation of the retained human checkpoint; a working GitHub repository; and a five-minute stakeholder presentation.

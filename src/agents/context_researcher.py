@@ -1,6 +1,26 @@
-"""Context / Angle Researcher agent."""
+"""Context / Angle Researcher agent.
 
-from typing import Optional
+it produces editorial guidance for the Writer.
+
+Context Research:
+- guides audience, tone, framing, and organization
+- does NOT provide factual evidence
+- never creates R-### research records
+"""
+
+from __future__ import annotations
+
+from src.integrations.ai_gateway import (
+    call_agent_json,
+)
+from src.prompts.context_researcher_prompt import (
+    CONTEXT_ANGLE_RESEARCHER_SYSTEM_PROMPT,
+)
+from src.state import (
+    ClientBrief,
+    ContextNote,
+    ContextResearch,
+)
 
 
 ALLOWED_CATEGORIES = {
@@ -14,137 +34,133 @@ ALLOWED_CATEGORIES = {
 
 
 def run_context_research(
-    client_brief: dict,
-    context_research_request: Optional[dict] = None,
-) -> dict:
-    context_notes = []
-    recommended_outline = []
-    source_research_requests = []
+    client_brief: ClientBrief,
+    context_research_request: list[str] | None = None,
+) -> ContextResearch:
+    """
+    run the Context / Angle Researcher.
 
-    if not isinstance(client_brief, dict):
-        return {
-            "context_research": {
-                "context_summary": "",
-                "context_notes": [],
-                "recommended_outline": [],
-                "source_research_requests": [],
-            }
-        }
+    this agent provides editorial guidance only.
+    it must never create factual source evidence.
+    """
 
-    def add_note(
-        category: str,
-        recommendation: str,
-        rationale: str,
-        client_brief_reference: str,
-    ) -> None:
-        if category not in ALLOWED_CATEGORIES or not recommendation:
-            return
-
-        context_notes.append(
-            {
-                "context_id": f"CTX-{len(context_notes) + 1:03d}",
-                "category": category,
-                "recommendation": recommendation,
-                "rationale": rationale,
-                "client_brief_reference": client_brief_reference,
-            }
-        )
-
-    audience = client_brief.get("audience")
-    if audience:
-        add_note(
-            "audience",
-            f"Write for the audience described in the client brief: {audience}.",
-            "Keeps the article aligned with the requested readership.",
-            "audience",
-        )
-
-    tone = client_brief.get("tone")
-    if tone:
-        add_note(
-            "tone",
-            f"Use the tone requested in the client brief: {tone}.",
-            "Keeps the writing style aligned with the client request.",
-            "tone",
-        )
-
-    objective = client_brief.get("objective")
-    if objective:
-        add_note(
-            "framing",
-            f"Frame the article around the stated objective: {objective}.",
-            "Keeps the article focused on the intended outcome.",
-            "objective",
-        )
-
-    topic = client_brief.get("topic")
-    if topic:
-        add_note(
-            "article_angle",
-            f"Keep the article centered on the stated topic: {topic}.",
-            "Prevents the draft from drifting away from the requested subject.",
-            "topic",
-        )
-
-    required_sections = client_brief.get("required_sections", [])
-
-    if isinstance(required_sections, str):
-        required_sections = [required_sections]
-
-    if isinstance(required_sections, list):
-        for section in required_sections:
-            if section:
-                recommended_outline.append(
-                    {
-                        "section": str(section),
-                        "purpose": "Cover the section required by the client brief.",
-                        "context_ids": [],
-                    }
-                )
-
-    if isinstance(context_research_request, dict):
-        category = context_research_request.get("category")
-        recommendation = context_research_request.get("recommendation")
-
-        if category in ALLOWED_CATEGORIES and recommendation:
-            add_note(
-                category,
-                str(recommendation),
-                str(
-                    context_research_request.get(
-                        "rationale",
-                        "Recommendation supplied in the context research request.",
-                    )
-                ),
-                str(context_research_request.get("client_brief_reference", "")),
-            )
-
-        requested_facts = context_research_request.get(
-            "source_research_requests",
-            [],
-        )
-
-        if isinstance(requested_facts, list):
-            for request in requested_facts:
-                if isinstance(request, dict) and request.get("question"):
-                    source_research_requests.append(
-                        {
-                            "question": str(request["question"]),
-                            "reason": str(request.get("reason", "")),
-                        }
-                    )
-
-    context_summary = (
-        f"{len(context_notes)} editorial context note(s) prepared."
-        if context_notes
-        else "No editorial context notes were prepared."
+    context_research_request = (
+        context_research_request or []
     )
 
-    return {
-        "context_research": {
-            "context_summary": context_summary,
-            "context_notes": context_notes,
-            "recommended_outline": recommended_outline,
-            "source_research_requests": source_research_requests,
-        }
-    }
+    result = call_agent_json(
+        system_prompt=(
+            CONTEXT_ANGLE_RESEARCHER_SYSTEM_PROMPT
+        ),
+        input_payload={
+            "client_brief": client_brief,
+            "context_research_request": (
+                context_research_request
+            ),
+        },
+    )
+
+    research = (
+        result.get("context_research")
+        or {}
+    )
+
+    raw_notes = research.get(
+        "context_notes",
+        [],
+    )
+
+    context_notes: list[
+        ContextNote
+    ] = []
+
+    # validating context notes
+
+    for index, note in enumerate(
+        raw_notes,
+        start=1,
+    ):
+
+        if not isinstance(
+            note,
+            dict,
+        ):
+            continue
+
+        category = note.get(
+            "category"
+        )
+
+        recommendation = note.get(
+            "recommendation"
+        )
+
+        if (
+            category
+            not in ALLOWED_CATEGORIES
+        ):
+            continue
+
+        if not recommendation:
+            continue
+
+        # normalize CTX identifier instead of
+        # blindly trusting the model's ID.
+        context_id = (
+            f"CTX-{len(context_notes) + 1:03d}"
+        )
+
+        context_notes.append(
+            ContextNote(
+                context_id=context_id,
+                category=category,
+                recommendation=str(
+                    recommendation
+                ),
+                rationale=str(
+                    note.get(
+                        "rationale",
+                        "",
+                    )
+                ),
+                client_brief_reference=str(
+                    note.get(
+                        "client_brief_reference",
+                        "",
+                    )
+                ),
+            )
+        )
+
+    context_summary = research.get(
+        "context_summary",
+        "",
+    )
+
+    if not context_summary:
+
+        context_summary = (
+            f"{len(context_notes)} editorial "
+            "context note(s) prepared."
+            if context_notes
+            else (
+                "No editorial context notes "
+                "were prepared."
+            )
+        )
+
+    return ContextResearch(
+        context_summary=context_summary,
+
+        context_notes=context_notes,
+
+        recommended_outline=research.get(
+            "recommended_outline",
+            [],
+        ),
+
+        source_research_requests=research.get(
+            "source_research_requests",
+            [],
+        ),
+    )

@@ -202,7 +202,7 @@ cp .env.example .env            # then fill in your real API keys
 ## How to Run the System
  
 ```bash
-python src/main.py --brief path/to/client_brief.json
+python -m src.main
 ```
  
 This runs a client brief through the full pipeline: parallel research → shared state merge → Writer → Critic → retry (if needed) → human gate (if triggered) → final output, with a full log written for the run.

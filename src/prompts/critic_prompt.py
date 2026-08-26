@@ -193,54 +193,14 @@ OUTPUT FORMAT
 {
   "verdict": "FAIL",
   "checks": [
-    {
-      "check_id": "K1",
-      "check_name": "factual_grounding",
-      "status": "FAIL",
-      "notes": "See I-001."
-    },
-    {
-      "check_id": "K2",
-      "check_name": "source_fidelity",
-      "status": "PASS",
-      "notes": ""
-    },
-    {
-      "check_id": "K3",
-      "check_name": "unsupported_claims",
-      "status": "FAIL",
-      "notes": "See I-001."
-    },
-    {
-      "check_id": "K4",
-      "check_name": "client_requirements",
-      "status": "PASS",
-      "notes": ""
-    },
-    {
-      "check_id": "K5",
-      "check_name": "internal_consistency",
-      "status": "PASS",
-      "notes": ""
-    },
-    {
-      "check_id": "K6",
-      "check_name": "publication_risk",
-      "status": "PASS",
-      "notes": ""
-    },
-    {
-      "check_id": "K7",
-      "check_name": "research_uncertainty",
-      "status": "PASS",
-      "notes": ""
-    },
-    {
-      "check_id": "K8",
-      "check_name": "conflicting_evidence",
-      "status": "PASS",
-      "notes": ""
-    }
+    {"check_id": "K1", "check_name": "factual_grounding", "status": "FAIL", "notes": "See I-001."},
+    {"check_id": "K2", "check_name": "source_fidelity", "status": "PASS", "notes": ""},
+    {"check_id": "K3", "check_name": "unsupported_claims", "status": "FAIL", "notes": "See I-001."},
+    {"check_id": "K4", "check_name": "client_requirements", "status": "PASS", "notes": ""},
+    {"check_id": "K5", "check_name": "internal_consistency", "status": "PASS", "notes": ""},
+    {"check_id": "K6", "check_name": "publication_risk", "status": "PASS", "notes": ""},
+    {"check_id": "K7", "check_name": "research_uncertainty", "status": "PASS", "notes": ""},
+    {"check_id": "K8", "check_name": "conflicting_evidence", "status": "PASS", "notes": ""}
   ],
   "issues": [
     {
@@ -254,12 +214,8 @@ OUTPUT FORMAT
     }
   ],
   "revision_instructions": [
-    {
-      "issue_id": "I-001",
-      "instruction": ""
-    }
+    {"issue_id": "I-001", "instruction": ""}
   ],
   "warnings": []
 }
 """
-

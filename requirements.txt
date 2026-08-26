@@ -1,6 +1,3 @@
-# Core dependencies will be added by us
-# Example:
-# python-dotenv
-# sqlalchemy
-# pytest
-# requests
+requests
+pytest
+python-dotenv

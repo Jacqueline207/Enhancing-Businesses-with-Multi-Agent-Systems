@@ -13,118 +13,255 @@ The orchestrator is the only to assemble inputs and apply outuputs
 
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Any
 import uuid
+
+Confidence = Literal["high", "medium", "low"]
+
+
+ClaimType = Literal[
+    "fact", "statistic", "quote", "date", "study_finding",
+    "event", "causal_claim", "attributed_opinion",
+]
+
+ContextCategory = Literal[
+    "audience", "tone", "framing", "theme", "article_angle", "general_context",
+]
+
+Severity = Literal["minor", "major", "critical"]
+
+CheckStatus = Literal["PASS", "FAIL", "WARNING"]
+
+Verdict = Literal["PASS", "FAIL"]
+
+FinalStatus = Literal["COMPLETED", "HUMAN_REVIEW", "FAILED_MAX_RETRIES"]
+
+CheckId = Literal["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"]
+
+
+"""
+these are the only permitted values for CriticIssue.issue_type, anything else
+returned by a real LLM call should be coerced to "unsupported_claim"
+ (see agents/critic.py normalize_issue())
+"""
+ISSUE_TYPES: tuple[str, ...] = (
+    "unsupported_claim",
+    "source_misrepresentation",
+    "invented_statistic",
+    "invented_quote",
+    "invented_source",
+    "invented_entity",
+    "context_note_used_as_fact",
+    "missing_citation_marker",
+    "missing_requirement",
+    "tone_violation",
+    "length_violation",
+    "internal_contradiction",
+    "uncertainty_misrepresented",
+    "conflicting_evidence_mishandled",
+    "publication_risk",
+)
+
+@dataclass
+class ClientBrief:
+    """
+    the client's request, read by both researchers, the Writer, and the Critic
+    """
+    topic: str
+    audience: str
+    tone: str
+    length: str
+    required_sections: list[str] = field(default_factory=list)
+    objective: Optional[str] = None
+    format: Optional[str] = None
+    special_instructions: Optional[str] = None
+
+@dataclass
+class SourceClaim:
+    """
+    one atomic factual research record. Only R-### records may support
+    a factual claim in the Writer's article.
+    """
+    claim_id: str
+    claim_type: ClaimType
+    claim: str
+    evidence: str
+    source_title: str = ""
+    source_publisher: str = ""
+    source_url_or_reference: str = ""
+    source_date: str = ""
+    confidence: Confidence = "high"
+    uncertainty_note: str = ""
+    conflicts_with: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SourceResearch:
+    research_summary: str = ""
+    claims: list[SourceClaim] = field(default_factory=list)
+    conflicting_evidence: list[str] = field(default_factory=list)
+    missing_information: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ContextNote:
+    """
+    editorial guidance only. CTX-### records never prove a factual claim
+    """
+    context_id: str
+    category: ContextCategory
+    recommendation: str
+    rationale: str = ""
+    client_brief_reference: str = ""
+
+
+@dataclass
+class ContextResearch:
+    context_summary: str = ""
+    context_notes: list[ContextNote] = field(default_factory=list)
+    recommended_outline: list[str] = field(default_factory=list)
+    source_research_requests: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ClaimTraceEntry:
+    draft_excerpt: str
+    claim_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RequirementSelfCheck:
+    requirement: str
+    met: bool
+    notes: str = ""
+
+
+@dataclass
+class RevisionSummaryEntry:
+    status: Literal["resolved", "not_resolved", "not_applicable"]
+    issue_id: Optional[str] = None
+    action: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@dataclass
+class WriterOutput:
+    title: str = ""
+    article: str = ""
+    source_claim_ids_used: list[str] = field(default_factory=list)
+    claim_trace: list[ClaimTraceEntry] = field(default_factory=list)
+    requirements_self_check: list[RequirementSelfCheck] = field(default_factory=list)
+    unsupported_or_missing_information: list[str] = field(default_factory=list)
+    revision_summary: list[RevisionSummaryEntry] = field(default_factory=list)
+
+
+@dataclass
+class CriticCheck:
+    check_id: CheckId
+    check_name: str
+    status: CheckStatus
+    notes: str = ""
+
+
+@dataclass
+class CriticIssue:
+    issue_id: str
+    check_ids: list[str]
+    issue_type: str
+    severity: Severity
+    draft_excerpt: str = ""
+    evidence: list[str] = field(default_factory=list)
+    explanation: str = ""
+
+
+@dataclass
+class RevisionInstruction:
+    issue_id: str
+    instruction: str
+
+
+@dataclass
+class CriticOutput:
+    """
+    critic output contract. the Critic judges quality only, it never
+    returns retry_count, retry_recommended, human_review_required,
+    next_action, or final_status. Those belong to the Orchestrator
+    """
+    verdict: Verdict
+    checks: list[CriticCheck] = field(default_factory=list)
+    issues: list[CriticIssue] = field(default_factory=list)
+    revision_instructions: list[RevisionInstruction] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class WorkflowEvent:
+    run_id: str
+    timestamp: str
+    agent: str
+    event: str
+    extra: Optional[dict[str, Any]] = None
 
 
 @dataclass
 class SharedState:
-    #identification, runs metadata
-
-    """
-    create a unique id, generated automatically after a created shared state
-    not passed in, usefull for logging
-    """
-    run_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-
-    #automated timestamp
+    # identification runs metadata
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     #input
-    """
-    clients request is topic, audience, tone, length, required, sections, etc
-    Orchestrator.run(client_brief) is read by both research agents, the writer and the critic
-    """
-    client_brief: dict = field(default_factory=dict)
+    client_brief: ClientBrief = field(default_factory=lambda: ClientBrief(
+        topic="", audience="", tone="", length=""))
 
-    #research (filled in parallel before writer is run)
-    """
-    raw factual sources found by the Source Researcher
-    """
-    research_sources: List[dict] = field(default_factory=list)
+    # Research filled in parallel before writer runs
+    source_research: Optional[SourceResearch] = None
+    context_research: Optional[ContextResearch] = None
 
-    """
-    verified facts pulled from research_sources. The Critic checks Writer's claims against
-    and the expected shape should be: [{"fact": str, "source": str}, ...]
-    """
-    key_facts: List[dict] = field(default_factory=list)
-
-    """
-    Audience, tone/angle information from the Context Researcher and the expected shape is:
-    {"audience_summary": str, "themes": [...], "suggested_angle": str}
-    """
-    audience_context: dict = field(default_factory=dict)
-
-    #writer
-    """
-    The article text produced by the Writer agent (the prompt). Is overwritten on every retry
-    with revised draft
-    """
+    # writer is overwritten on every retry with revised draft
+    writer_output: Optional[WriterOutput] = None
     writer_draft: Optional[str] = None
-
-    """
-    Which attempt it is. Incremented by the Orchestrator every time the Writer runs
-    """
     draft_version: int = 0
 
-    #critic
+    # the critic
+    critic_output: Optional[CriticOutput] = None
+    critic_verdict: Optional[Verdict] = None
+    critic_issues: list[CriticIssue] = field(default_factory=list)
+    critic_evidence: list[str] = field(default_factory=list)
+    revision_instructions: list[RevisionInstruction] = field(default_factory=list)
+    # Highest severity present in the current critic issues.
+    severity: Optional[Severity] = None
 
-    """
-    pass/fail. Orchestrators retry loop branches on this field
-    """
-    critic_verdict: Optional[Literal["PASS", "FAIL"]] = None
-
-    """
-    plain language list of what is wrong with the draft. Used to show humans during
-    escalation and also useful for QA test records
-    """
-    critic_issues: List[str] = field(default_factory=list)
-
-    """
-    what source or client requirements poves each issue real. Used to verify Critic's 
-    judgement
-    """
-    critic_evidence: List[str] = field(default_factory=list)
-
-    """
-    the specific instructions for what the Writer should change. Is only set when 
-    verdict is FAIL. Orchestrator hands this to run_writer() on next retry in order 
-    to target retry
-    """
-    revision_instructions: Optional[str] = None
-
-    """
-    how bad failure is. Can be used for the type of handling action
-    """
-    severity: Optional[Literal["Mino", "Major", "Critical"]] = None
-
-    """
-    Critic's own opinion (if retry is worthwhile). informational only
-    """
-    critic_retry_flag: Optional[bool] = None
-
-    #retry
+    #retry is owned by the orchestrator
     retry_count: int = 0
-
-    """
-    once retry_cout reaches 2 (for now) the Orchestrator stops automated retries
-    """
     max_retries: int = 2
 
-    #final
-    final_status: Optional[Literal[
-        "COMPLETED", "HUMAN_REVIEW", "FAILED_MAX_RETRIES"
-    ]] = None
-
-    """
-    actual deliverable (passing draft or human-review placeholder message if never passed)
-    """
+    # Final
+    final_status: Optional[FinalStatus] = None
     final_output: Optional[str] = None
 
-    def to_dict(self) -> dict:
-        """
-        A full snapshot of state. logging should be able to dump at any point in the run
-        """
-        return asdict(self)
+    # full exhange log for the run
+    events: list[WorkflowEvent] = field(default_factory=list)
+
+
+def create_shared_state(client_brief: ClientBrief, max_retries: int = 2) -> SharedState:
+    return SharedState(client_brief=client_brief, max_retries=max_retries)
+
+
+def to_dict(state: SharedState) -> dict[str, Any]:
+    """Full JSON-serializable snapshot of state, mirroring toDict() in state.ts."""
+    return asdict(state)
+
+
+def highest_severity(issues: list[CriticIssue]) -> Optional[Severity]:
+    """Highest severity across a set of issues, or None when there are none."""
+    if any(i.severity == "critical" for i in issues):
+        return "critical"
+    if any(i.severity == "major" for i in issues):
+        return "major"
+    if any(i.severity == "minor" for i in issues):
+        return "minor"
+    return None

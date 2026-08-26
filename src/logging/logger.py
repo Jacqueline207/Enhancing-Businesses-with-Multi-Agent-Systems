@@ -1,115 +1,62 @@
 """
-logger should record the workflow, SharedState.to_dict() for state capatured 
-
 structured logging for the multi-agent workflow
 
-each workflow run get its own JSONL log file.
+one event is one record and events are appended to state.events which
+is the run's full log
 
-one line = one event
+the events names in use across the workflow:
 
-ex:
--run_start
--research_start
--research_complete
--writer_start
--writer_complete
--critic_start
--critic_complete
--retry_triggered
--max_retries_reached
--human_review_flagged
--pass_final_output
--run_end
+run_start, research_start, research_complete, writer_start, writer_complete,
+critic_start, critic_complete, retry_triggered, max_retries_reached, human_review_flagged
+pass_final_output, run_end, agent_error
 """
 
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
-#directory where workflow logs are stored
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from src.state import SharedState, WorkflowEvent
+
+EventEmitter = Callable[[WorkflowEvent], None]
+
+_emitters: dict[str, EventEmitter] = {}
+
+
+def register_emitter(run_id: str, emitter: EventEmitter) -> None:
+    _emitters[run_id] = emitter
+
+
+def unregister_emitter(run_id: str) -> None:
+    _emitters.pop(run_id, None)
+
 
 def _timestamp() -> str:
-    #Return the current UTC timestamp
     return datetime.now(timezone.utc).isoformat()
-
-def _serialize(value: Any) -> Any:
-    """
-    convert objects into JSON-safe values.
-
-    this keeps logging from crashing the workflow if an object is not
-    directly JSON serializable
-    """
-    if value is None:
-        return None
-
-    if isinstance(value, (str, int, float, bool)):
-        return value
-
-    if isinstance(value, dict):
-        return {
-            str(key): _serialize(item)
-            for key, item in value.items()
-        }
-
-    if isinstance(value, (list, tuple)):
-        return [_serialize(item) for item in value]
-
-    # Handle dataclasses such as SharedState.
-    if hasattr(value, "to_dict"):
-        return _serialize(value.to_dict())
-
-    # Final fallback so logging never crashes the workflow.
-    return str(value)
-
-
-def _get_log_path(run_id: str) -> Path:
-    #return the JSONL log path for a workflow run
-    return LOG_DIR / f"run_{run_id}.jsonl"
 
 
 def log_event(
-    state,
+    state: SharedState,
     agent: str,
     event: str,
-    extra: dict | None = None,
-) -> None:
-    
-    """
-    write one structured event to the current run's JSONL log.
+    extra: dict[str, Any] | None = None,
+) -> WorkflowEvent:
+    record = WorkflowEvent(
+        run_id=state.run_id,
+        timestamp=_timestamp(),
+        agent=agent,
+        event=event,
+        extra=extra,
+    )
 
-    parameters
-    ----------
-    state:
-        Current SharedState object.
+    state.events.append(record)
 
-    agent:
-        Name of the agent or workflow component generating the event.
+    emit = _emitters.get(state.run_id)
+    if emit is not None:
+        try:
+            emit(record)
+        except Exception:
+            # Logging must never break the workflow.
+            pass
 
-    event:
-        Name describing what happened.
-
-    extra:
-        Optional additional information specific to the event.
-    """
-
-    record = {
-        "timestamp": _timestamp(),
-        "run_id": state.run_id,
-        "agent": agent,
-        "event": event,
-        "retry_count": state.retry_count,
-        "draft_version": state.draft_version,
-        "data": _serialize(extra or {}),
-    }
-
-    log_path = _get_log_path(state.run_id)
-
-    try:
-        with log_path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        #logging should not be allowed to crash the entire workflow.
-        print(f"[WARNING] Unable to write log event: {exc}")
+    return record

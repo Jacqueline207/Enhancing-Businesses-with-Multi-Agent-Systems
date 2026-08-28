@@ -85,10 +85,24 @@ Research is parallelized because the Writer should not produce factual claims be
 | Owner | Role | Owns |
 |---|---|---|
 | Ana Cortez | Orchestrator Engineer | Main workflow, execution order, parallel-agent coordination, shared state, routing PASS/FAIL |
-| Dejameir Bagot | Integration Engineer | Research/tool APIs, external data connections, agent-to-agent data compatibility |
+| Dejameir Bagot & Krystle Baylor| Integration Engineer | Research/tool APIs, external data connections, agent-to-agent data compatibility |
 | James Paek | Prompt Engineer | Separate system prompts for each agent (Role, Input, Task, Rules, Restrictions, Output Format) |
 | Jackie Recendez | Logging & Observability Engineer | Full exchange logging across every run |
 | Krystle Baylor | QA / Critic Engineer | Critic logic and quality-assurance testing across all layers |
+
+## Individual Contribution — Krystle Baylor
+
+I served as the QA / Critic Engineer and contributed to integration engineering for the project.
+
+My contributions included:
+
+- Owning Critic logic and quality-assurance testing across the workflow.
+- Evaluating whether generated drafts met factual, source, client, consistency, and publication-quality requirements.
+- Supporting PASS/FAIL behavior, issue reporting, revision instructions, and retry/escalation testing.
+- Integrating the research, writer, critic, and workflow components so they could operate together as one multi-agent system.
+- Contributing integration work through a merged GitHub pull request.
+
+My work focused on both system quality and making sure the major agent components connected and functioned together correctly.
  
 ## Shared State
  
